@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "author": "Endang Rusiana",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": -19.2, "left": -33.56, "attrs": {} },
+    {
+      "type": "wokwi-led",
+      "id": "led1",
+      "top": 15.6,
+      "left": 129,
+      "attrs": { "color": "limegreen", "flip": "1", "label": "IDLE" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": 71.15,
+      "left": 76.8,
+      "attrs": { "value": "220" }
+    },
+    { "type": "wokwi-gnd", "id": "gnd1", "top": 220.8, "left": 143.4, "attrs": {} },
+    {
+      "type": "wokwi-pushbutton-6mm",
+      "id": "btn2",
+      "top": 180.2,
+      "left": 96,
+      "attrs": { "color": "green", "label": "ERROR_TIRGGER" }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "txt1",
+      "top": 100,
+      "left": 490,
+      "attrs": { "text": "paper feeder" }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "txt2",
+      "top": -60,
+      "left": 140,
+      "attrs": { "text": "Printer Simulation Using FreeRTOS" }
+    },
+    { "type": "wokwi-gnd", "id": "gnd2", "top": 0, "left": 479.4, "attrs": {} },
+    { "type": "wokwi-vcc", "id": "vcc1", "top": -37.64, "left": 412.8, "attrs": {} },
+    {
+      "type": "board-ssd1306",
+      "id": "oled1",
+      "top": 166.34,
+      "left": 221.03,
+      "attrs": { "i2cAddress": "0x3c" }
+    },
+    { "type": "wokwi-vcc", "id": "vcc2", "top": 106.36, "left": 163.2, "attrs": {} },
+    {
+      "type": "wokwi-resistor",
+      "id": "r2",
+      "top": 80.75,
+      "left": 76.8,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r3",
+      "top": 90.35,
+      "left": 76.8,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led2",
+      "top": 15.6,
+      "left": 167.4,
+      "attrs": { "color": "yellow", "flip": "1", "label": "BUSSY" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led3",
+      "top": 15.6,
+      "left": 215.4,
+      "attrs": { "color": "red", "flip": "1", "label": "ERROR" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "bz1",
+      "top": -7.2,
+      "left": 280.2,
+      "attrs": { "volume": "0.1" }
+    },
+    {
+      "type": "wokwi-pushbutton-6mm",
+      "id": "btn1",
+      "top": 122.6,
+      "left": 96,
+      "attrs": { "color": "green", "label": "RESUME" }
+    },
+    { "type": "wokwi-servo", "id": "servo1", "top": 7.6, "left": 432, "attrs": {} },
+    {
+      "type": "wokwi-stepper-motor",
+      "id": "stepper1",
+      "top": 239.79,
+      "left": -39.63,
+      "rotate": 180,
+      "attrs": { "size": "17","arrow": "orange" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "r1:2", "led1:A", "green", [ "v0" ] ],
+    [ "btn2:1.l", "esp:15", "green", [ "h0" ] ],
+    [ "gnd1:GND", "btn2:2.l", "black", [ "v-9.6", "h-67.2" ] ],
+    [ "gnd1:GND", "led1:C", "black", [ "v-57.6" ] ],
+    [ "gnd1:GND", "oled1:GND", "black", [ "v-48", "h86.4" ] ],
+    [ "oled1:VCC", "vcc2:VCC", "red", [ "v0" ] ],
+    [ "oled1:SCL", "esp:22", "green", [ "v-19.2", "h115.5", "v-182.4", "h-307.2", "v57.6" ] ],
+    [ "esp:21", "oled1:SDA", "green", [ "h28.8", "v-76.8", "h288", "v163.2", "h-96.07" ] ],
+    [ "r1:1", "esp:19", "green", [ "v0" ] ],
+    [ "r2:1", "esp:18", "green", [ "v0" ] ],
+    [ "r3:1", "esp:5", "green", [ "v0" ] ],
+    [ "r2:2", "led2:A", "green", [ "v0", "h37.2" ] ],
+    [ "led3:A", "r3:2", "green", [ "v0" ] ],
+    [ "led3:C", "led2:C", "black", [ "v19.2", "h-29.2" ] ],
+    [ "led2:C", "led1:C", "black", [ "v19.2", "h-29.2" ] ],
+    [ "bz1:1", "led3:C", "green", [ "v0", "h-38.4" ] ],
+    [ "bz1:2", "esp:17", "green", [ "v28.8", "h-10" ] ],
+    [ "btn1:2.l", "btn2:2.l", "black", [ "h-9.6", "v29.2" ] ],
+    [ "btn1:1.l", "esp:4", "green", [ "h0" ] ],
+    [ "esp:2", "servo1:PWM", "green", [ "h9.6", "v-28.8", "h345.6" ] ],
+    [ "servo1:V+", "vcc1:VCC", "green", [ "h0" ] ],
+    [ "servo1:GND", "gnd2:GND", "black", [ "h0", "v-67.2" ] ],
+    [ "esp:32", "stepper1:A+", "green", [ "h-28.65", "v153.6", "h105.6" ] ],
+    [ "stepper1:A-", "esp:33", "green", [ "v-28.8", "h-28.8", "v0", "h-76.8", "v-48" ] ],
+    [ "esp:26", "stepper1:B-", "green", [ "h-47.85", "v19.2" ] ],
+    [ "stepper1:B+", "esp:27", "green", [ "v-9.6", "h-105.6", "v-124.8" ] ]
+  ],
+  "dependencies": {}
+}
