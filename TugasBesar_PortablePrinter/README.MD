@@ -1,4 +1,4 @@
-#Portable Printer Simulation
+# Portable Printer Simulation <br>
 <img src="images/simulationVScode.png" alt="Alt text" width="800">
 Simulasi portable printer menggunakan VSCode. <br>
 1. file diagram.json di edit pakai notepad untuk gambar rangkaian.<br>
