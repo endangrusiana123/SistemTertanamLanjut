@@ -8,6 +8,7 @@
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
+#define EN_LCD_PIN 16
 #define LED_IDLE_PIN 19
 #define LED_BUSY_PIN 18
 #define LED_ERROR_PIN 5
@@ -19,279 +20,373 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define PRINT_JOB_QUEUE_SIZE 5
 #define MAX_PRINT_PAGES 10
 
-#define DEB_RECEIVE_PRINT_JOB 14
-#define DEB_PRINT_JOB_TASK 27
-#define DEB_MONITOR_PRINTER_STAT 32
-#define DEB_PAPER_FEED 33
-#define DEB_ERROR_HANDLING 25
-#define SERIAL_INPUT 26
+#define P_ERROR 0
+#define P_POWER_SAVER 1
+#define P_IDLE 2
+#define P_BUSY 3
 
-const int stepsPerRevolution = 64;  // change this to fit the number of steps per revolution
-// for your motor
-// initialize the stepper library on pins 8 through 11:
+const int stepsPerRevolution = 64;
 Stepper myStepper(stepsPerRevolution, 26, 27, 32, 33);
 
-// Queues
 QueueHandle_t printJobQueue;
 SemaphoreHandle_t printSemaphore;
 SemaphoreHandle_t statusSemaphore;
-SemaphoreHandle_t inputSemaphore;  // Semaphore to signal new input
 
-// Printer Status
-bool printerIdle = true;
-bool printerError = false;
-int printJobPages = 0;
+// Task handles
+TaskHandle_t printJobTaskHandle = NULL;
+TaskHandle_t errorHandlingTaskHandle = NULL;
 
-// Serial input buffer
-char inputBuffer[10];  // Buffer to hold incoming serial data
-int bufferIndex = 0;   // Index for input buffer
-
-// Create Servo object
+int AllPrinterStat = P_IDLE;
+bool change_priority_receivePrint = false;
+char inputBuffer[10];
+int bufferIndex = 0;
+unsigned long count_idle = 0;
 Servo paperFeedServo;
 
-// Task Prototypes
+// Task prototypes
 void receivePrintJobTask(void *pvParameters);
 void printJobTask(void *pvParameters);
-void monitorPrinterStatusTask(void *pvParameters);
-void paperFeedTask(void *pvParameters);
 void errorHandlingTask(void *pvParameters);
-void serialInputTask(void *pvParameters);
+void powerSaverTask(void *pvParameters);
+int monitorPrinterStatusTask(int statPrinter);
+TaskHandle_t receivePrintJobTaskHandle;
+
+// 'printing_inv', 16x16px
+const unsigned char imgprinting_inv [] PROGMEM = {
+	0x00, 0x00, 0x1f, 0xf8, 0x10, 0x08, 0x10, 0x08, 0x7f, 0xfe, 0xff, 0xff, 0xff, 0xe7, 0xff, 0xff, 
+	0xff, 0xff, 0xff, 0xff, 0xf0, 0x0f, 0xf7, 0xef, 0x10, 0x08, 0x13, 0xc8, 0x1f, 0xf8, 0x00, 0x00
+};
+// 'wall-clock_inv', 16x16px
+const unsigned char imgwall_clock_inv [] PROGMEM = {
+	0x00, 0x00, 0x00, 0xf0, 0x00, 0x18, 0x20, 0x04, 0x00, 0x06, 0x00, 0x02, 0x00, 0x02, 0x01, 0x02, 
+	0x01, 0x02, 0x06, 0x02, 0x44, 0x02, 0x00, 0x06, 0x20, 0x04, 0x10, 0x18, 0x0f, 0xf0, 0x01, 0x00
+};
+// 'error_inv', 16x16px
+const unsigned char imgerror_inv [] PROGMEM = {
+	0x07, 0xe0, 0x1f, 0xf8, 0x3f, 0xfc, 0x7f, 0xfe, 0x7f, 0xfe, 0xfb, 0xdf, 0xfd, 0xbf, 0xfe, 0x7f, 
+	0xfe, 0x7f, 0xfd, 0xbf, 0xfb, 0xdf, 0x7f, 0xfe, 0x7f, 0xfe, 0x3f, 0xfc, 0x1f, 0xf8, 0x07, 0xe0
+};
+// 'warning_inv', 16x16px
+const unsigned char imgwarning_inv [] PROGMEM = {
+	0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x03, 0xc0, 0x07, 0xe0, 0x06, 0x60, 0x0e, 0x70, 0x0e, 0x70, 
+	0x1f, 0xf8, 0x3f, 0xfc, 0x3e, 0x7c, 0x7e, 0x7e, 0x3f, 0xfc, 0x3f, 0xfc, 0x00, 0x00, 0x00, 0x00
+};
+// 'energy-saving_inv', 16x16px
+const unsigned char imgenergy_saving_inv [] PROGMEM = {
+	0x00, 0x00, 0x07, 0xf0, 0x08, 0x0c, 0x10, 0x04, 0x20, 0x82, 0x21, 0xc1, 0x43, 0x61, 0x43, 0x61, 
+	0xe2, 0x31, 0xe3, 0x61, 0xe3, 0x61, 0x80, 0x02, 0x00, 0x04, 0x00, 0x8c, 0x00, 0xf0, 0x00, 0x00
+};
 
 void setup() {
   Serial.begin(115200);
 
+  pinMode(EN_LCD_PIN, OUTPUT);
+  digitalWrite(EN_LCD_PIN, HIGH);
   pinMode(LED_IDLE_PIN, OUTPUT);
   pinMode(LED_BUSY_PIN, OUTPUT);
   pinMode(LED_ERROR_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
-  pinMode(RESUME_BUTTON_PIN, INPUT_PULLUP);  // Set the resume button pin as input with pull-up
-  pinMode(BUZZER_PIN, OUTPUT);
-
-  // set the speed at 60 rpm:
-  myStepper.setSpeed(60);
+  pinMode(RESUME_BUTTON_PIN, INPUT_PULLUP);
 
   paperFeedServo.attach(SERVO_PIN);
   paperFeedServo.write(0);
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println(F("SSD1306 allocation failed"));
-    for (;;);
+    while (true);
   }
-  display.display();
-  delay(2000);
+
+
   display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
   display.setTextColor(WHITE);
-  display.setCursor(0, 0);
-  display.println("Printer ready...");
+  display.setCursor(20, 8);
+  display.println("Portable Printer");
+  // Display a warning icon at position (40, 20)
+  display.drawBitmap(56, 24, imgprinting_inv , 16, 16, WHITE);
   display.display();
+  vTaskDelay(1500);
+
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 54);
+  display.println("Printer ready...");
   Serial.println("Printer ready...");
+  display.display();
+  vTaskDelay(300);
 
   printJobQueue = xQueueCreate(PRINT_JOB_QUEUE_SIZE, sizeof(int));
   printSemaphore = xSemaphoreCreateBinary();
   statusSemaphore = xSemaphoreCreateBinary();
-  inputSemaphore = xSemaphoreCreateBinary();  // Create semaphore for serial input
 
-  // Create Tasks
-  xTaskCreate(receivePrintJobTask, "Receive Print Job", 4096, NULL, 3, NULL);
-  xTaskCreate(printJobTask, "Print Job Task", 4096, NULL, 2, NULL);
-  xTaskCreate(monitorPrinterStatusTask, "Monitor Printer Status", 4096, NULL, 1, NULL);
-  xTaskCreate(paperFeedTask, "Paper Feed Task", 4096, NULL, 1, NULL);
-  xTaskCreate(errorHandlingTask, "Error Handling Task", 4096, NULL, 1, NULL);
-  xTaskCreate(serialInputTask, "Serial Input Task", 4096, NULL, 1, NULL);
+  xTaskCreate(receivePrintJobTask, "Receive Print Job Task", 4096, NULL, 3, &receivePrintJobTaskHandle);
+  xTaskCreate(powerSaverTask, "Power Saver Task", 4096, NULL, 1, NULL);
+  
+  digitalWrite(LED_IDLE_PIN, HIGH);
 }
 
 void loop() {
-  // Nothing in loop, all handled by tasks
   delay(10);
 }
 
-// Task for reading serial input and storing it into a buffer
-void serialInputTask(void *pvParameters) {
-  while (true) {
-    if (Serial.available()) {
-
-      char c = Serial.read();  // Read character from serial
-      if (c == '\n' || bufferIndex >= sizeof(inputBuffer) - 1) {  // End of input (newline or buffer full)
-        inputBuffer[bufferIndex] = '\0';  // Null-terminate the string
-        bufferIndex = 0;  // Reset the buffer index
-
-        // Signal the receivePrintJobTask that new data is available
-        xSemaphoreGive(inputSemaphore);
-      } else {
-        inputBuffer[bufferIndex++] = c;  // Add character to buffer
-      }
-    }
-    vTaskDelay(pdMS_TO_TICKS(10));  // Small delay to avoid overloading the processor
-  }
-}
-
-// Task 1: Process Print Job Command from serial input
+// Task for receiving print jobs
 void receivePrintJobTask(void *pvParameters) {
   while (true) {
-    if (xSemaphoreTake(inputSemaphore, portMAX_DELAY) == pdTRUE) {
-      // Convert inputBuffer to integer
-      int pages = atoi(inputBuffer);
+    if (Serial.available()) {
+      char c = Serial.read();
+      digitalWrite(EN_LCD_PIN, HIGH);
+      if (c == '\n' || bufferIndex >= sizeof(inputBuffer) - 1) {
+        inputBuffer[bufferIndex] = '\0';
+        bufferIndex = 0;
 
-      if (pages > 0 && pages <= MAX_PRINT_PAGES) {
-        Serial.print("Received print job with ");
-        Serial.print(pages);
-        Serial.println(" pages. Available Queue:");
+        int pages = atoi(inputBuffer);
+        if (pages > 0 && pages <= MAX_PRINT_PAGES) {
+          Serial.printf("Received print job with %d pages.\n", pages);
 
-        int availableSpace = uxQueueSpacesAvailable(printJobQueue);
-        Serial.println(availableSpace);
-        // Send the print job (number of pages) to the print queue
-        if (xQueueSend(printJobQueue, &pages, 0) == pdPASS) {
-          Serial.println("Print job added to queue.");
-          xSemaphoreGive(printSemaphore);  // Notify Print Task to start
-        } else {
-          Serial.println("Failed to add print job to queue.");
-        }
-      } else if (pages != 0) {
-        Serial.print(pages);
-        Serial.println(" Invalid input. Please enter a number between 1 and 10.");
-      }
-    }
-    vTaskDelay(pdMS_TO_TICKS(500));  // Wait before checking for input again
-  }
-}
+          if (xQueueSend(printJobQueue, &pages, 0) == pdPASS) {
+            Serial.println("Print job added to queue.");
 
-// Task 2: Simulate the print job processing
-void printJobTask(void *pvParameters) {
-  while (true) {
-    // Wait for a valid print job to arrive
-    if (xSemaphoreTake(printSemaphore, portMAX_DELAY) == pdTRUE) {
-      int pages = 0;  // Use local variable to hold the number of pages from the queue
-      if (xQueueReceive(printJobQueue, &pages, portMAX_DELAY) == pdPASS) {
-        if (printerIdle) {
-          printerIdle = false;
-          digitalWrite(LED_BUSY_PIN, HIGH);
-          digitalWrite(LED_IDLE_PIN, LOW);
-
-          display.clearDisplay();
-          display.setCursor(0, 0);
-          display.print("Printing ");
-          display.print(pages);  // Use the value from the queue
-          display.println(" pages...");
-          display.display();
-          Serial.println("Printing...");
-          vTaskDelay(pdMS_TO_TICKS(1000));
-
-          // Simulate printing pages
-          for (int i = 1; i <= pages; i++) {
-            // Check if there's an error before proceeding
-            while (printerError) {
-              Serial.println("Printing paused due to error. Waiting for resume...");
-              display.clearDisplay();
-              display.setCursor(0, 0);
-              display.println("Error! Printing paused.");
-              display.display();              
-              // Wait for resume signal from resume button (polling it)
-              while (digitalRead(RESUME_BUTTON_PIN) == HIGH) {
-                vTaskDelay(pdMS_TO_TICKS(100));  // Polling every 100 ms
-              }
-
-              // Once resume button is pressed, clear the error state and continue printing
-              printerError = false;
-              digitalWrite(LED_ERROR_PIN, LOW);
-              Serial.println("Resuming print job...");
-
-              // Move the servo to simulate paper feed when resuming after an error
-              paperFeedServo.write(90);  // Simulate paper feed movement
-              vTaskDelay(pdMS_TO_TICKS(1000));  // Paper feed delay
-              paperFeedServo.write(0);   // Reset servo
-
-              display.clearDisplay();
-              display.setCursor(0, 0);
-              display.print("Resuming...");
-              display.display();
+            // Ensure Print Job Task is created
+            if (printJobTaskHandle == NULL) {
+              xTaskCreate(printJobTask, "Print Job Task", 4096, NULL, 2, &printJobTaskHandle);
+              Serial.println("Print Job Task created.");
             }
 
-            // Continue printing
-            Serial.print("Printing page ");
-            Serial.println(i);
-            display.clearDisplay();
-            display.setCursor(0, 0);
-            display.print("Page ");
-            display.print(i);
-            display.println(" printed.");
-            display.display();
-            myStepper.step(stepsPerRevolution);
-            vTaskDelay(pdMS_TO_TICKS(300));  // Reduced delay to avoid long freezes
+            // Ensure Error Handling Task is created
+            if (errorHandlingTaskHandle == NULL) {
+              xTaskCreate(errorHandlingTask, "Error Handling Task", 4096, NULL, 1, &errorHandlingTaskHandle);
+              Serial.println("Error Handling Task created.");
+            }
+
+            xSemaphoreGive(printSemaphore);
+            xSemaphoreGive(statusSemaphore);
+          } else {
+            Serial.println("Queue full. Cannot add print job.");
           }
-          // After printing is done, set the printer to idle
-          Serial.println("Print job complete.");
-          digitalWrite(LED_BUSY_PIN, LOW);
-          digitalWrite(LED_IDLE_PIN, HIGH);
+        } else {
+          Serial.println("Invalid input. Enter a number between 1 and 10.");
+        }
+      } else {
+        inputBuffer[bufferIndex++] = c;
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+}
 
-          printerIdle = true;
-          xSemaphoreGive(statusSemaphore);  // Notify Status Task
+void powerSaverTask(void *pvParameters) {
+  while (true) {
+    if(digitalRead(RESUME_BUTTON_PIN) == LOW){
+        if(AllPrinterStat == P_POWER_SAVER){
+          display.fillRect(0, 40, 128, 24, BLACK);
+          display.display();
+          display.setCursor(0, 54);
+          display.print("Standby...");
+          display.display();
+          AllPrinterStat = monitorPrinterStatusTask(P_IDLE);
+          count_idle = millis(); 
+        }    
+    }
+    else if((AllPrinterStat == P_IDLE)||(AllPrinterStat == P_IDLE)){
+      unsigned long current_millis = millis();
+      Serial.println("count idle");
+      Serial.println(count_idle);
+      Serial.println(current_millis);
+      if (current_millis - count_idle > 5000){
+        Serial.println("Printer enter power saver mode.");
+        display.fillRect(0, 40, 128, 24, BLACK);
+        display.display();
+        display.setCursor(0, 54);
+        display.print("Enter power saver");
+        display.display();
+        AllPrinterStat = monitorPrinterStatusTask(P_POWER_SAVER);  
+      } 
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+}
+// Task for processing print jobs
+void printJobTask(void *pvParameters) {
+  while (true) {
+    if (xSemaphoreTake(printSemaphore, portMAX_DELAY) == pdTRUE) {
+      int pages = 0;
+      if (xQueueReceive(printJobQueue, &pages, portMAX_DELAY) == pdPASS) {
+        AllPrinterStat = monitorPrinterStatusTask(P_BUSY);
 
-          // Ensure the semaphore is given so that the next print job can start
-          xSemaphoreGive(printSemaphore);
-          
-          // Add a small delay to avoid immediate paper feed
-          vTaskDelay(pdMS_TO_TICKS(2000));  // Wait before notifying the paper feed task
+        Serial.println("Printing job started...");
+        // Clears a 16x16 area at position (56, 24)
+        display.fillRect(0, 40, 128, 24, BLACK);
+        display.display();
+        display.setCursor(0, 54);
+        display.print("Printing ");
+        display.print(pages);
+        display.println(" pages...");
+        display.display();
+
+        // Feed paper only once before printing
+        Serial.println("Feeding paper...");
+        paperFeedServo.write(90);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        paperFeedServo.write(0);
+
+        // Simulate printing pages
+        for (int i = 1; i <= pages; i++) {
+          while (AllPrinterStat ==  P_ERROR) {
+            Serial.println("Printing paused due to error. Waiting for resume...");
+            display.fillRect(0, 40, 128, 24, BLACK);
+            display.display();
+            display.setCursor(0, 54);
+            display.println("Error! Printing paused.");
+            display.display();              
+            // Wait for resume signal from resume button (polling it)
+            while (digitalRead(RESUME_BUTTON_PIN) == HIGH) {
+              vTaskDelay(pdMS_TO_TICKS(100));  // Polling every 100 ms
+            }
+
+            // Once resume button is pressed, clear the error state and continue printing
+            AllPrinterStat = monitorPrinterStatusTask(P_BUSY);
+            Serial.println("Resuming print job...");
+
+            // Move the servo to simulate paper feed when resuming after an error
+            paperFeedServo.write(90);  // Simulate paper feed movement
+            vTaskDelay(pdMS_TO_TICKS(1000));  // Paper feed delay
+            paperFeedServo.write(0);   // Reset servo
+
+            display.fillRect(0, 40, 128, 24, BLACK);
+            display.display();
+            display.setCursor(0, 54);
+            display.print("Resuming...");
+            display.display();
+          }
+          Serial.printf("Printing page %d\n", i);
+          display.fillRect(0, 40, 128, 24, BLACK);
+          display.display();
+          display.setCursor(0, 54);
+          display.print("Page ");
+          display.print(i);
+          display.println(" printed.");
+          display.display();
+          myStepper.step(stepsPerRevolution);
+          vTaskDelay(pdMS_TO_TICKS(500));
+        }
+
+        // After printing is done, set the printer to idle
+        Serial.println("Print job complete.");
+
+        count_idle = millis();
+        AllPrinterStat = monitorPrinterStatusTask(P_IDLE);
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+}
+
+int monitorPrinterStatusTask(int printerStat) {
+  //=========printer error==============================
+  if (printerStat == P_ERROR) {
+    Serial.println("Error: Printer has a problem!");
+    digitalWrite(LED_IDLE_PIN, LOW);
+    digitalWrite(LED_ERROR_PIN, HIGH);
+    digitalWrite(LED_BUSY_PIN, LOW);
+    digitalWrite(EN_LCD_PIN, HIGH);
+    tone(BUZZER_PIN, 1000, 500);  // Buzzer for error
+    
+    display.fillRect(0, 0, 128, 40, BLACK);
+    display.display();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(20, 8);
+    display.println("Printer Error");
+    display.drawBitmap(56, 24, imgerror_inv, 16, 16, WHITE);
+    display.display();
+  //=========printer error==============================
+  } 
+  else if (printerStat == P_POWER_SAVER){
+      if(!change_priority_receivePrint){
+        Serial.println("change receivePrintJobTaskHandle to 1");
+        change_priority_receivePrint = true;
+        vTaskPrioritySet(receivePrintJobTaskHandle, 1);
+      } 
+      Serial.println("Turn off some component");
+      digitalWrite(LED_IDLE_PIN, LOW);
+      digitalWrite(LED_ERROR_PIN, LOW);
+      digitalWrite(LED_BUSY_PIN, LOW);
+      digitalWrite(EN_LCD_PIN, LOW);
+      display.fillRect(0, 0, 128, 40, BLACK);
+      display.display();
+      display.setTextColor(SSD1306_WHITE);
+      display.setTextSize(1);
+      display.setTextColor(WHITE);
+      display.setCursor(20, 8);
+      display.println("Power Saver Mode");
+      display.drawBitmap(56, 24, imgenergy_saving_inv, 16, 16, WHITE);
+      display.display();
+      if (uxQueueMessagesWaiting(printJobQueue) == 0) {
+        Serial.println("No more jobs in queue. Deleting tasks...");
+        if (printJobTaskHandle != NULL) {
+          vTaskDelete(printJobTaskHandle);
+          printJobTaskHandle = NULL;
+          Serial.println("Deleting tasks printJob...");
+        }
+        if (errorHandlingTaskHandle != NULL) {
+          vTaskDelete(errorHandlingTaskHandle);
+          errorHandlingTaskHandle = NULL;
+          Serial.println("Deleting tasks errorHandling...");
         }
       }
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));  // Periodic check
   }
+  else if (printerStat == P_IDLE) {
+    Serial.println("Printer is idle.");
+    digitalWrite(LED_ERROR_PIN, LOW);
+    digitalWrite(LED_BUSY_PIN, LOW);
+    digitalWrite(LED_IDLE_PIN, HIGH);
+    digitalWrite(EN_LCD_PIN, HIGH);
+
+    display.fillRect(0, 0, 128, 40, BLACK);
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(20, 8);
+    display.println("Printer Standby");
+    display.drawBitmap(56, 24, imgwall_clock_inv, 16, 16, WHITE);
+    display.display();
+  }       
+  else if (printerStat == P_BUSY) {
+    Serial.println("Printer is busy...");
+    digitalWrite(LED_ERROR_PIN, LOW);
+    digitalWrite(LED_BUSY_PIN, HIGH);
+    digitalWrite(LED_IDLE_PIN, LOW);
+    digitalWrite(EN_LCD_PIN, HIGH);
+
+    display.fillRect(0, 0, 128, 40, BLACK);
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(20, 8);
+    display.println("Printing...");
+    display.drawBitmap(56, 24, imgprinting_inv, 16, 16, WHITE);
+    display.display();
+
+    if(change_priority_receivePrint){
+      Serial.println("change receivePrintJobTaskHandle to 3");
+      vTaskPrioritySet(receivePrintJobTaskHandle, 3);
+      change_priority_receivePrint = false;
+    }
+  }
+  return printerStat;
 }
 
-// Task 3: Simulate printer status monitoring
-void monitorPrinterStatusTask(void *pvParameters) {
-  while (true) {
-    if (xSemaphoreTake(statusSemaphore, portMAX_DELAY) == pdTRUE) {
-      if (printerError) {
-        Serial.println("Error: Printer has a problem!");
-        digitalWrite(LED_ERROR_PIN, HIGH);
-        tone(BUZZER_PIN, 1000, 500);  // Buzzer for error
-      } else if (printerIdle) {
-        Serial.println("Printer is idle.");
-        digitalWrite(LED_ERROR_PIN, LOW);
-        digitalWrite(LED_IDLE_PIN, HIGH);
-      } else {
-        Serial.println("Printer is busy...");
-        digitalWrite(LED_BUSY_PIN, HIGH);
-      }
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));  // Periodic check
-  }
-}
-
-// Task 4: Simulate paper feed mechanism
-void paperFeedTask(void *pvParameters) {
-  bool lastPrinterIdleState = false;  // Track last idle state
-  while (true) {
-    if (printerIdle && !lastPrinterIdleState) {
-      // Only feed paper when the printer goes from busy to idle (one-time feed)
-      Serial.println("Feeding paper for next job...");
-      paperFeedServo.write(90);  // Simulate paper feed movement
-      vTaskDelay(pdMS_TO_TICKS(1000));  // Paper feed delay
-      paperFeedServo.write(0);   // Reset servo
-      vTaskDelay(pdMS_TO_TICKS(1000));  // Paper feed delay
-      
-      lastPrinterIdleState = true;
-      Serial.println("Paper feeder move...");
-    }
-    else if (!printerIdle) {
-      lastPrinterIdleState = false;  // Reset to detect next idle state
-    }
-    vTaskDelay(pdMS_TO_TICKS(500));
-  }
-}
-
-// Task 5: Error Handling (Simulate error via button press)
+// Task for error handling
 void errorHandlingTask(void *pvParameters) {
   while (true) {
-    if (digitalRead(BUTTON_PIN) == LOW) {
-      // Simulate printer error
-      printerError = true;
-      digitalWrite(LED_ERROR_PIN, HIGH);
-      tone(BUZZER_PIN, 1000, 500);  // Beep for error
-      vTaskDelay(pdMS_TO_TICKS(1000));  // Debounce button
+    if ((digitalRead(BUTTON_PIN) == LOW)&&(AllPrinterStat==P_BUSY)) {
+      AllPrinterStat = monitorPrinterStatusTask(P_ERROR);
     }
-    vTaskDelay(pdMS_TO_TICKS(100));  // Periodic check
+    if((digitalRead(RESUME_BUTTON_PIN) == LOW)&&(AllPrinterStat == P_ERROR)){
+      AllPrinterStat = monitorPrinterStatusTask(P_BUSY);
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
