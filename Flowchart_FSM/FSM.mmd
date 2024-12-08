@@ -1,1 +1,28 @@
+stateDiagram-v2
+    [*] --> Idle: Startup Completed
+    Idle --> PowerSaver: Inactivity Timeout
+    Idle --> Busy: Print Job Received
+    Idle --> Error: Error Detected (Paper/Ink)
 
+    PowerSaver --> Idle: Resume Button Pressed
+    PowerSaver --> Busy: Print Job Received
+    PowerSaver --> Error: Error Detected (Paper/Ink)
+
+    Busy --> Idle: Print Job Completed
+    Busy --> Error: Error Detected (Paper/Ink)
+
+    Error --> Idle: Resume Button Pressed and Error Resolved
+    Error --> Busy: Resume Button Pressed and Print Job Resumes
+
+    state Idle {
+        [*] --> Standby: No Activity
+    }
+    state PowerSaver {
+        [*] --> EnergySavingMode: LCD and LEDs Off
+    }
+    state Busy {
+        [*] --> Printing: Printing in Progress
+    }
+    state Error {
+        [*] --> ErrorState: Error Handled
+    }
