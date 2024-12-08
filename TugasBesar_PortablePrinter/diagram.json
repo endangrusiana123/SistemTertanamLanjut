@@ -18,13 +18,13 @@
       "left": 76.8,
       "attrs": { "value": "220" }
     },
-    { "type": "wokwi-gnd", "id": "gnd1", "top": 220.8, "left": 143.4, "attrs": {} },
+    { "type": "wokwi-gnd", "id": "gnd1", "top": 240, "left": 143.4, "attrs": {} },
     {
       "type": "wokwi-pushbutton-6mm",
       "id": "btn2",
-      "top": 180.2,
-      "left": 96,
-      "attrs": { "color": "green", "label": "ERROR_TIRGGER" }
+      "top": 161,
+      "left": 105.6,
+      "attrs": { "color": "green", "label": "ERROR_PAPER" }
     },
     {
       "type": "wokwi-text",
@@ -114,6 +114,13 @@
       "top": 109.55,
       "left": 86.4,
       "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-pushbutton-6mm",
+      "id": "btn3",
+      "top": 199.4,
+      "left": 105.6,
+      "attrs": { "color": "green", "label": "ERROR_INK_LEVEL" }
     }
   ],
   "connections": [
@@ -121,7 +128,6 @@
     [ "esp:RX", "$serialMonitor:TX", "", [] ],
     [ "r1:2", "led1:A", "green", [ "v0" ] ],
     [ "btn2:1.l", "esp:15", "green", [ "h-19.2", "v-28.8" ] ],
-    [ "gnd1:GND", "btn2:2.l", "black", [ "v-9.6", "h-67.2" ] ],
     [ "gnd1:GND", "led1:C", "black", [ "v-57.6" ] ],
     [ "gnd1:GND", "oled1:GND", "black", [ "v-48", "h86.4" ] ],
     [ "oled1:SCL", "esp:22", "green", [ "v-19.2", "h115.5", "v-182.4", "h-307.2", "v57.6" ] ],
@@ -147,7 +153,10 @@
     [ "led4:C", "gnd1:GND", "black", [ "v0" ] ],
     [ "vcc2:VCC", "oled1:VCC", "red", [ "v0" ] ],
     [ "esp:16", "r4:1", "green", [ "h0" ] ],
-    [ "r4:2", "led4:A", "green", [ "v0" ] ]
+    [ "r4:2", "led4:A", "green", [ "v0" ] ],
+    [ "btn2:2.l", "btn3:2.l", "black", [ "h-19.2", "v38.8" ] ],
+    [ "btn3:2.l", "gnd1:GND", "black", [ "h-19.2", "v19.6" ] ],
+    [ "btn3:1.l", "esp:23", "green", [ "h-28.8", "v-182.4" ] ]
   ],
   "dependencies": {}
 }
