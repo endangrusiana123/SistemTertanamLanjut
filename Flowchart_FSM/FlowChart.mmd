@@ -1,52 +1,28 @@
-flowchart TD
-    A[Start] --> B[Setup Function]
-    B -->|Initialize components| C[Check Display Initialization]
-    C -->|Display Initialized| D[Display Startup Info]
-    C -->|Display Not Initialized| E[Error: Display Allocation Failed]
-    E --> F[End]
-
-    D --> G[Attach Servo Motor]
-    G --> H[Create Queues and Semaphores]
-    H --> I[Create Tasks]
-    I --> J[Printer Ready]
-    J --> K[Loop Function]
-
-    K --> L[Task: Receive Print Job]
-    L -->|Serial Input Available| M[Parse Print Job]
-    M -->|Valid Input| N[Add Job to Queue & Notify Semaphore]
-    M -->|Invalid Input| O[Error: Invalid Job Format]
-    N -->|Queue Full| P[Error: Queue Full]
-    N -->|Queue Not Full| Q[Create Print Job Task if Not Exists]
-
-    K --> R[Task: Power Saver]
-    R -->|Resume Button Pressed| S[Exit Power Saver Mode]
-    R -->|Idle Timeout| T[Enter Power Saver Mode]
-    T --> U[Turn Off Components]
-    S --> V[Set Idle Mode]
-
-    K --> W[Task: Print Job Task]
-    W -->|Semaphore Triggered| X[Retrieve Print Job from Queue]
-    X -->|Job Available| Y[Start Printing Job]
-    Y --> Z[Feed Paper and Print Pages]
-    Z -->|Pages Complete| AA[Check Queue for More Jobs]
-    AA -->|Queue Empty| AB[Set Idle Mode]
-    AA -->|Queue Not Empty| AC[Continue Printing]
-
-    K --> AD[Task: Display Task]
-    AD -->|Semaphore Triggered| AE[Update Display Content]
-    AE --> AF[Update OLED Display]
-
-    K --> AG[Task: Status Monitoring]
-    AG -->|Status Changed| AH[Update LEDs & Buzzer]
-    AH -->|Error Status| AI[Error LED & Buzzer]
-    AH -->|Power Saver| AJ[Turn Off LEDs & LCD]
-    AH -->|Idle Status| AK[Idle LED On]
-    AH -->|Busy Status| AL[Busy LED On]
-
-    W -->|Error Detected| AI[Pause Job for Error Resolution]
-    AI -->|Resume Button Pressed| AM[Resume Printing Job]
-
-    V --> J
-    AB --> J
-    AF --> K
-    AM --> Y
+graph TD
+    A[Start] --> B[Initialize Components]
+    B --> C{Receive Print Job?}
+    C -->|Yes| D[Parse Job Details]
+    D --> E{Job Valid?}
+    E -->|Yes| F[Add Job to Queue]
+    E -->|No| G[Display Error Message]
+    F --> H{Queue Full?}
+    H -->|Yes| I[Discard Job & Notify]
+    H -->|No| J[Activate Print Task]
+    J --> K{Queue has Jobs?}
+    K -->|Yes| L[Process Job]
+    K -->|No| M[Enter Idle Mode]
+    L --> N[Check Errors]
+    N -->|Error| O[Display Error & Pause]
+    O --> P{Resume Button Pressed?}
+    P -->|Yes| Q[Resume Job]
+    Q --> K
+    N -->|No Error| R[Continue Printing]
+    R --> K
+    M --> S{Idle for Long?}
+    S -->|Yes| T[Enter Power Saver Mode]
+    S -->|No| U[Remain in Idle Mode]
+    T --> V{Resume Button Pressed?}
+    V -->|Yes| W[Exit Power Saver Mode]
+    V -->|No| X[Stay in Power Saver Mode]
+    W --> C
+    U --> C
