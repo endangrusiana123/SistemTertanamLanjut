@@ -1,5 +1,5 @@
 # Portable Printer Simulation <br>
-<img src="../images/simulationVScode.png" alt="Alt text" width="800">
+<img src="../images/simulationVScode_20241210.png" alt="Alt text" width="800">
 Simulasi portable printer menggunakan VSCode. <br>
 1. file diagram.json di edit pakai notepad untuk gambar rangkaian.<br>
 2. file wokwi.toml dibuat sebagai pengaturan simulasi.<br>
