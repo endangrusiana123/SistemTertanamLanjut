@@ -76,6 +76,8 @@ void statusMonitoringTask(void *pvParameters);
 // Function to move the motor to a target position incrementally
 void moveStepperToPosition(int targetPosition, int speedMode);
 void errorCheck();
+void oledDisplayInit();
+void displayCreateTask();
 
 // 'printing_inv', 16x16px
 const unsigned char imgprinting_inv [] PROGMEM = {
@@ -134,10 +136,7 @@ void setup() {
   pinMode(INKLEVEL_SENS_PIN, INPUT_PULLUP);
   pinMode(RESUME_BTN_PIN, INPUT_PULLUP);
 
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    while (true);
-  }
+  oledDisplayInit();
 
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
@@ -186,6 +185,20 @@ void loop() {
   delay(10);
 }
 
+void displayCreateTask(){
+  if (displayTaskHandle == NULL) {
+    xTaskCreate(displayTask, "Display Task", 4096, NULL, 1, &displayTaskHandle);
+    Serial.println("Display Task created.");
+  }
+}
+
+void oledDisplayInit(){
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    while (true);
+  }
+}
+
 // Task for receiving print jobs
 void receivePrintJobTask(void *pvParameters) {
   while (true) {
@@ -231,6 +244,7 @@ void receivePrintJobTask(void *pvParameters) {
 
         if (xQueueSend(printJobQueue, &job, 0) == pdPASS) {
           Serial.println("Print job added to queue.");
+          displayCreateTask();
           // Ensure Print Job Task is created
           if (printJobTaskHandle == NULL) {
             xTaskCreate(printJobTask, "Print Job Task", 4096, NULL, 2, &printJobTaskHandle);
@@ -254,6 +268,7 @@ int idleStat = 0;
     if (xSemaphoreTake(statusPrinterSemaphore, portMAX_DELAY) == pdTRUE) {
       if(digitalRead(RESUME_BTN_PIN) == LOW){
         if(printerStat2Disp == P_POWER_SAVER){
+          displayCreateTask();
           printerStat2Disp = P_IDLE;
           while(xSemaphoreTake(displaySemaphore, 0) != pdTRUE) {
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -490,7 +505,7 @@ void displayTask(void *pvParameters) {
     String localLine1 = "";
     String localLine2 = "";
     int localIndexImg = P_IDLE;
-
+    int initStat = 0;
     while (true) {
         // Take the semaphore to access shared resources
         if (xSemaphoreTake(displaySemaphore, portMAX_DELAY) == pdTRUE) {
@@ -502,42 +517,48 @@ void displayTask(void *pvParameters) {
             // Release semaphore after copying
             xSemaphoreGive(displaySemaphore);
         }
-        // Clear the display areas
-        display.fillRect(0, 0, 128, 40, BLACK);
-        display.fillRect(0, 40, 128, 24, BLACK);
-
-        // Update the display
-        display.setTextColor(SSD1306_WHITE);
-        display.setTextSize(1);
-        display.setCursor(20, 8);
-        display.println(localLine1);
-
-        switch (localIndexImg) {
-          case P_IDLE:
-            // Draw the bitmap image
-            display.drawBitmap(56, 24, imgwall_clock_inv, 16, 16, WHITE);
-          break;
-          case P_ERROR:
-            // Draw the bitmap image
-            display.drawBitmap(56, 24, imgerror_inv, 16, 16, WHITE);
-          break;
-          case P_POWER_SAVER:
-            // Draw the bitmap image
-            display.drawBitmap(56, 24, imgenergy_saving_inv, 16, 16, WHITE);
-          break;
-          case P_BUSY:
-            // Draw the bitmap image
-            display.drawBitmap(56, 24, imgprinting_inv, 16, 16, WHITE);
-          break;
+        if(initStat == 0){
+          oledDisplayInit();
+          initStat = 1;
         }
+        else{
+          // Clear the display areas
+          display.fillRect(0, 0, 128, 40, BLACK);
+          display.fillRect(0, 40, 128, 24, BLACK);
 
-        // Display the second line of text
-        display.setCursor(0, 54);
-        display.print(localLine2);
+          // Update the display
+          display.setTextColor(SSD1306_WHITE);
+          display.setTextSize(1);
+          display.setCursor(20, 8);
+          display.println(localLine1);
 
-        // Push updates to the display
-        display.display();
+          switch (localIndexImg) {
+            case P_IDLE:
+              // Draw the bitmap image
+              display.drawBitmap(56, 24, imgwall_clock_inv, 16, 16, WHITE);
+            break;
+            case P_ERROR:
+              // Draw the bitmap image
+              display.drawBitmap(56, 24, imgerror_inv, 16, 16, WHITE);
+            break;
+            case P_POWER_SAVER:
+              // Draw the bitmap image
+              display.drawBitmap(56, 24, imgenergy_saving_inv, 16, 16, WHITE);
+            break;
+            case P_BUSY:
+              // Draw the bitmap image
+              display.drawBitmap(56, 24, imgprinting_inv, 16, 16, WHITE);
+            break;
+          }
 
+          // Display the second line of text
+          display.setCursor(0, 54);
+          display.print(localLine2);
+
+          // Push updates to the display
+          display.display();
+
+        }
         // Delay for 300 ms
         vTaskDelay(pdMS_TO_TICKS(500));
     }
@@ -579,6 +600,11 @@ int PrevLocalPrinterStat2Disp = P_IDLE;
               vTaskDelete(printJobTaskHandle);
               printJobTaskHandle = NULL;
               Serial.println("Deleting tasks printJob...");
+            }
+            if (displayTaskHandle != NULL) {
+              vTaskDelete(displayTaskHandle);
+              displayTaskHandle = NULL;
+              Serial.println("Deleting tasks display...");
             }
           }
       }
