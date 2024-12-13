@@ -1,0 +1,52 @@
+flowchart TD
+    %% Initialization
+    A[Start (Initialization)] --> B[Setup Hardware (LCD, LEDs, Servo, Stepper Motor, Tasks)]
+    B --> C[Display 'Printer Setup' Message]
+
+    %% Receive Print Job Task
+    C --> D[Receive Print Job Task]
+    D --> E{Check Serial Input}
+    E --> F[Parse Job Details (Validate Input)]:::process
+    E -->|No Input| D
+    F --> G[Add Job to Queue]
+    G --> H[Create Print Job Task (if not running)]
+
+    %% Print Job Task
+    H --> I[Print Job Task]
+    I --> J{Wait for Semaphore}
+    J --> K[Fetch Job from Queue]
+    K --> L[Display 'Printing']
+    L --> M[Simulate Printing (Feed Paper, Move Motor)]
+    M --> N[Set Printer to Idle]
+    J -->|No Jobs| I
+
+    %% Power Saver Task
+    N --> O[Power Saver Task]
+    O --> P{Monitor Idle Time}
+    P --> Q[Enter Power Saver Mode (Turn Off LEDs, LCD)]
+    P -->|Resume Button Pressed| R[Resume from Power Saver]
+
+    %% Display Task
+    R --> S[Display Task]
+    S --> T[Update OLED Display (Status, Icon)]
+
+    %% Status Monitoring Task
+    T --> U[Status Monitoring Task]
+    U --> V{Check Printer Status}
+    V --> W[Update LEDs, Buzzer Based on Status]
+    W --> X[Manage Task Priority (Idle, Busy, Power Saver)]
+
+    %% Error Handling
+    M --> Y[Error Handling]
+    Y --> Z{Check Paper & Ink Levels}
+    Z --> AA[Pause Printing (Display Error)]
+    AA --> AB[Resume Printing (After Error Resolved)]
+    AB --> M
+    Z -->|No Error| M
+
+    %% Motor Control
+    M --> AC[Motor Control]
+    AC --> AD[Move Stepper Motor (Calculate Steps)]
+
+    %% Styling
+    classDef process fill:#f9f,stroke:#333,stroke-width:2px;
