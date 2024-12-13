@@ -1,28 +1,67 @@
+%% Mermaid syntax for the flowchart
 graph TD
-    A[Start] --> B[Initialize Components]
-    B --> C{Receive Print Job?}
-    C -->|Yes| D[Parse Job Details]
-    D --> E{Job Valid?}
-    E -->|Yes| F[Add Job to Queue]
-    E -->|No| G[Display Error Message]
-    F --> H{Queue Full?}
-    H -->|Yes| I[Discard Job & Notify]
-    H -->|No| J[Activate Print Task]
-    J --> K{Queue has Jobs?}
-    K -->|Yes| L[Process Job]
-    K -->|No| M[Enter Idle Mode]
-    L --> N[Check Errors]
-    N -->|Error| O[Display Error & Pause]
-    O --> P{Resume Button Pressed?}
-    P -->|Yes| Q[Resume Job]
-    Q --> K
-    N -->|No Error| R[Continue Printing]
-    R --> K
-    M --> S{Idle for Long?}
-    S -->|Yes| T[Enter Power Saver Mode]
-    S -->|No| U[Remain in Idle Mode]
-    T --> V{Resume Button Pressed?}
-    V -->|Yes| W[Exit Power Saver Mode]
-    V -->|No| X[Stay in Power Saver Mode]
-    W --> C
-    U --> C
+    %% Task: Receive Print Job Task
+    subgraph ReceivePrintJobTask
+        R1[Check Serial Input] -->|Data Available| R2[Read Character]
+        R2 -->|Newline or Buffer Full| R3[Parse Input Buffer]
+        R3 -->|Valid Input| R4[Create Print Job]
+        R4 -->|Queue Available| R5[Add Job to Queue]
+        R5 --> R6[Give Print Semaphore]
+        R6 --> R1
+        R3 -->|Invalid Input| R7[Log Error]
+        R7 --> R1
+        R2 -->|No Data Available| R1
+    end
+
+    %% Task: Print Job Task
+    subgraph PrintJobTask
+        P1[Take Print Semaphore] -->|Semaphore Acquired| P2[Receive Job from Queue]
+        P2 --> P3[Initialize Printing]
+        P3 --> P4[Move Servo to Feed Paper]
+        P4 --> P5[Start Printing Pages]
+        P5 --> P6[Move Stepper Motor]
+        P6 --> P7[Check Error State]
+        P7 -->|Error| P8[Pause Printing]
+        P8 -->|Resume Signal| P5
+        P7 -->|No Error| P9[Print Complete]
+        P9 -->|Queue Empty| P10[Set to Idle]
+        P10 -->|Update Semaphore| P1
+        P9 -->|Queue Not Empty| P11[Give Print Semaphore]
+        P11 --> P1
+    end
+
+    %% Task: Display Task
+    subgraph DisplayTask
+        D1[Take Display Semaphore] -->|Semaphore Acquired| D2[Copy Shared Data]
+        D2 --> D3[Clear Display Areas]
+        D3 --> D4[Update Text and Image]
+        D4 --> D5[Push Updates to Display]
+        D5 --> D1
+    end
+
+    %% Task: Status Monitoring Task
+    subgraph StatusMonitoringTask
+        S1[Take Status Semaphore] -->|Semaphore Acquired| S2[Read Printer Status]
+        S2 -->|Status Changed| S3[Update LEDs and Components]
+        S3 -->|Error| S4[Sound Buzzer]
+        S3 -->|Power Saver| S5[Turn Off Components]
+        S3 -->|Idle| S6[Set Idle State]
+        S3 -->|Busy| S7[Set Busy State]
+        S7 --> S1
+        S6 --> S1
+        S5 --> S1
+        S4 --> S1
+        S2 -->|No Status Change| S1
+    end
+
+    %% Task: Power Saver Task
+    subgraph PowerSaverTask
+        PS1[Take Status Semaphore] -->|Semaphore Acquired| PS2[Check Resume Button]
+        PS2 -->|Pressed| PS3[Exit Power Saver]
+        PS3 -->|Update Display| PS4[Set to Idle]
+        PS4 -->|Release Semaphore| PS1
+        PS2 -->|Not Pressed| PS5[Check Idle Time]
+        PS5 -->|Exceeded Limit| PS6[Enter Power Saver Mode]
+        PS6 -->|Update Display| PS1
+        PS5 -->|Within Limit| PS1
+    end
