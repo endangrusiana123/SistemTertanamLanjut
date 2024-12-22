@@ -52,6 +52,7 @@ char inputBuffer[12];
 int bufferIndex = 0;
 unsigned long count_idle = 0;
 Servo paperFeedServo;
+Servo buzzerError;
 int printerStat2Disp = P_IDLE;
 
 typedef struct {
@@ -164,6 +165,7 @@ void setup() {
   // vTaskDelay(pdMS_TO_TICKS(3000));
   delay(3000);
   paperFeedServo.attach(SERVO_PIN);
+  buzzerError.attach(BUZZER_PIN);
   paperFeedServo.write(0);
   // Set motor speed (maximum speed; actual speed controlled via delay)
   myStepper.setSpeed(rpm);
@@ -393,7 +395,13 @@ String error_text = "";
 
     ////Serial.println("Printing paused due to error. Waiting for resume...");
     // Wait for resume signal from resume button (polling it)
+    int buzzerCount = 0;
     while (digitalRead(RESUME_BTN_PIN) == HIGH) {
+      if(buzzerCount<5){
+        buzzerCount++;
+        tone(BUZZER_PIN, 1000, 500);  // Buzzer for error
+        vTaskDelay(pdMS_TO_TICKS(500));  // Polling every 100 ms
+      }
       vTaskDelay(pdMS_TO_TICKS(100));  // Polling every 100 ms
     }
 
@@ -590,7 +598,7 @@ int PrevLocalPrinterStat2Disp = P_IDLE;
         digitalWrite(LED_ERROR_PIN, HIGH);
         digitalWrite(LED_BUSY_PIN, LOW);
         digitalWrite(EN_LCD_PIN, HIGH);
-        tone(BUZZER_PIN, 1000, 500);  // Buzzer for error
+        //tone(BUZZER_PIN, 1000, 500);  // Buzzer for error
       //=========printer error==============================
       } 
       else if (printerStat2Disp == P_POWER_SAVER){
