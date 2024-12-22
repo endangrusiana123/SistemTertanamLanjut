@@ -612,6 +612,12 @@ int PrevLocalPrinterStat2Disp = P_IDLE;
           digitalWrite(LED_ERROR_PIN, LOW);
           digitalWrite(LED_BUSY_PIN, LOW);
           digitalWrite(EN_LCD_PIN, LOW);
+
+          //turnoff stepper
+          digitalWrite(26,LOW);
+          digitalWrite(27,LOW);
+          digitalWrite(32,LOW);
+          digitalWrite(33,LOW);  
           if (uxQueueMessagesWaiting(printJobQueue) == 0) {
             ////Serial.println("No more jobs in queue. Deleting tasks...");
             if (printJobTaskHandle != NULL) {
