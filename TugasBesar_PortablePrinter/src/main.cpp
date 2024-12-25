@@ -14,8 +14,11 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define LED_ERROR_PIN 5
 #define PAPER_SENS_PIN 15            // Simulating error printing
 #define INKLEVEL_SENS_PIN 23         // Simulating error printing
+#define PAPER_SENS_PIN 15            // Simulating error printing
+#define INKLEVEL_SENS_PIN 23         // Simulating error printing
 #define BUZZER_PIN 17
 #define SERVO_PIN 2
+#define RESUME_BTN_PIN 4   // Pin for the resume button
 #define RESUME_BTN_PIN 4   // Pin for the resume button
 
 #define PRINT_JOB_QUEUE_SIZE 5
@@ -24,27 +27,27 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define P_IDLE 0
 #define P_ERROR 1
 #define P_POWER_SAVER 2
+#define P_IDLE 0
+#define P_ERROR 1
+#define P_POWER_SAVER 2
 #define P_BUSY 3
 #define P_WARNING 4
 
-#define STEPS_PER_UNIT 200       // Steps per unit of movement (calibrate as needed)
+#define STEPS_PER_UNIT 4         // Steps per unit of movement (calibrate as needed)
 // Speed options (delay in milliseconds)
-#define SLOW_DELAY 800
-#define MEDIUM_DELAY 500
-#define FAST_DELAY 200
+#define SLOW_DELAY 10
+#define MEDIUM_DELAY 6
+#define FAST_DELAY 1
 #define SPEED_SLOW 1
 #define SPEED_MEDIUM 2
 #define SPEED_FAST 3
-#define END_POS_P_HEAD_FACTOR 32
+#define END_POS_P_HEAD 4
 #define PAPER_LINE 2
-#define CW 1
-#define CCW -1
 
 #define MODE_PAPER 0
 #define MODE_IMAGE 1
 
-const int stepsPerRevolution = 2048;
-const int rpm = 10;
+const int stepsPerRevolution = 64;
 Stepper myStepper(stepsPerRevolution, 26, 27, 32, 33);
 
 bool change_priority_receivePrint = false;
@@ -53,6 +56,18 @@ int bufferIndex = 0;
 unsigned long count_idle = 0;
 Servo paperFeedServo;
 Servo buzzerError;
+int printerStat2Disp = P_IDLE;
+
+typedef struct {
+    int pages;           // Number of pages
+    int mode;            // Printing mode (e.g., image or paper)
+} structPrintJobQueue;
+
+bool change_priority_receivePrint = false;
+char inputBuffer[10];
+int bufferIndex = 0;
+unsigned long count_idle = 0;
+Servo paperFeedServo;
 int printerStat2Disp = P_IDLE;
 
 typedef struct {
@@ -78,11 +93,10 @@ void powerSaverTask(void *pvParameters);
 void displayTask(void *pvParameters);
 void statusMonitoringTask(void *pvParameters);
 // Function to move the motor to a target position incrementally
-void moveStepperToPosition(int dir, int speedMode);
+void moveStepperToPosition(int targetPosition, int speedMode);
 void errorCheck();
 void oledDisplayInit();
 void displayCreateTask();
-void paperFeederMove();
 
 // 'printing_inv', 16x16px
 const unsigned char imgprinting_inv [] PROGMEM = {
@@ -140,7 +154,6 @@ void setup() {
   pinMode(PAPER_SENS_PIN, INPUT_PULLUP);
   pinMode(INKLEVEL_SENS_PIN, INPUT_PULLUP);
   pinMode(RESUME_BTN_PIN, INPUT_PULLUP);
-  delay(3000);
 
   oledDisplayInit();
 
@@ -153,8 +166,7 @@ void setup() {
   // Display a warning icon at position (40, 20)
   display.drawBitmap(56, 24, imgprinting_inv , 16, 16, WHITE);
   display.display();
-  // vTaskDelay(pdMS_TO_TICKS(1500));
-  delay(3000);
+  vTaskDelay(pdMS_TO_TICKS(1500));
 
   display.setTextSize(1);
   display.setTextColor(WHITE);
@@ -162,13 +174,12 @@ void setup() {
   display.println("Printer setup");
   Serial.println("Printer setup");
   display.display();
-  // vTaskDelay(pdMS_TO_TICKS(3000));
-  delay(3000);
+  vTaskDelay(pdMS_TO_TICKS(300));
+
   paperFeedServo.attach(SERVO_PIN);
-  buzzerError.attach(BUZZER_PIN);
   paperFeedServo.write(0);
   // Set motor speed (maximum speed; actual speed controlled via delay)
-  myStepper.setSpeed(rpm);
+  myStepper.setSpeed(10);
 
   printJobQueue = xQueueCreate(PRINT_JOB_QUEUE_SIZE, sizeof(structPrintJobQueue));
   printSemaphore = xSemaphoreCreateBinary();
@@ -179,8 +190,11 @@ void setup() {
 
   count_idle = millis(); 
   xTaskCreate(receivePrintJobTask, "Receive Print Job Task", 4096, NULL, 3, &receivePrintJobTaskHandle);
-  xTaskCreate(displayTask, "Display Task", 4096, NULL, 1, &displayTaskHandle); 
+  Serial.println("task1 created..");
+  xTaskCreate(displayTask, "Display Task", 4096, NULL, 1, &displayTaskHandle);
+  Serial.println("task2 created..");
   xTaskCreate(statusMonitoringTask, "Status Monitoring Task", 4096, NULL, 1, &statusMonitoringTaskHandle);
+  Serial.println("task3 created..");
   xTaskCreate(powerSaverTask, "Power Saver Task", 4096, NULL, 1, NULL);
   // Serial.println("task1 created..");
   // vTaskDelay(pdMS_TO_TICKS(100));
@@ -190,8 +204,7 @@ void setup() {
   // vTaskDelay(pdMS_TO_TICKS(100));
   
   digitalWrite(LED_IDLE_PIN, HIGH);
-  //Serial.println("Printer ready...");
-  // vTaskDelay(pdMS_TO_TICKS(100));
+  Serial.println("Printer ready...");
 }
 
 void loop() {
@@ -201,13 +214,13 @@ void loop() {
 void displayCreateTask(){
   if (displayTaskHandle == NULL) {
     xTaskCreate(displayTask, "Display Task", 4096, NULL, 1, &displayTaskHandle);
-    //Serial.println("Display Task created.");
+    Serial.println("Display Task created.");
   }
 }
 
 void oledDisplayInit(){
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    //Serial.println(F("SSD1306 allocation failed"));
+    Serial.println(F("SSD1306 allocation failed"));
     while (true);
   }
 }
@@ -249,13 +262,13 @@ void receivePrintJobTask(void *pvParameters) {
             continue;
         }
 
-        structPrintJobQueue jobSerial;
-        jobSerial.pages = pages;
-        jobSerial.mode = (printingMode == "image") ? MODE_IMAGE : MODE_PAPER;
+        structPrintJobQueue job;
+        job.pages = pages;
+        job.mode = (printingMode == "image") ? MODE_IMAGE : MODE_PAPER;
 
         Serial.printf("Received print job: %d pages, mode: %s\n", pages, token);
 
-        if (xQueueSend(printJobQueue, &jobSerial, 0) == pdPASS) {
+        if (xQueueSend(printJobQueue, &job, 0) == pdPASS) {
           Serial.println("Print job added to queue.");
           displayCreateTask();
           // Ensure Print Job Task is created
@@ -280,7 +293,6 @@ int idleStat = 0;
   while (true) {
     if (xSemaphoreTake(statusPrinterSemaphore, portMAX_DELAY) == pdTRUE) {
       if(digitalRead(RESUME_BTN_PIN) == LOW){
-        // Serial.println("powerSaverTaskLOW");
         if(printerStat2Disp == P_POWER_SAVER){
           displayCreateTask();
           printerStat2Disp = P_IDLE;
@@ -297,15 +309,14 @@ int idleStat = 0;
       }
       else if(printerStat2Disp == P_IDLE){
         unsigned long current_millis = millis();
-        // Serial.print("count idle: ");
-        // Serial.print(count_idle);
-        // Serial.println(current_millis);
-        if (current_millis - count_idle > 7000){
+        Serial.println("count idle");
+        Serial.println(count_idle);
+        Serial.println(current_millis);
+        if (current_millis - count_idle > 5000){
           Serial.println("Printer enter power saver mode.");
-          vTaskDelay(pdMS_TO_TICKS(100));
           printerStat2Disp = P_POWER_SAVER;
           while(xSemaphoreTake(displaySemaphore, 0) != pdTRUE) {
-          //  ////Serial.println("wait display");
+            Serial.println("wait display");
             vTaskDelay(pdMS_TO_TICKS(100));
           }
           message.line1 = TXT_POWER_SAVER;
@@ -327,7 +338,6 @@ int idleStat = 0;
       else{
         idleStat = 0;
       }
-      // Serial.println("powerSaverTask");
       xSemaphoreGive(statusPrinterSemaphore);
     }
     vTaskDelay(pdMS_TO_TICKS(100));
@@ -335,34 +345,40 @@ int idleStat = 0;
 }
 
 // Function to move the motor to a target position incrementally
-void moveStepperToPosition(int dir, int speedMode) {
-  int stepDelay;
-  int totalStep = 8;
-  // Set delay based on speed mode
-  switch (speedMode) {
-      case 1: stepDelay = SLOW_DELAY; break;    // Slow speed
-      case 2: stepDelay = MEDIUM_DELAY; break;  // Medium speed
-      case 3: stepDelay = FAST_DELAY; break;    // Fast speed
-      default: 
-          ////Serial.println("Invalid speed mode! Defaulting to medium speed.");
-          stepDelay = MEDIUM_DELAY;
-  }
-  
-  int stepMove = dir*stepsPerRevolution/END_POS_P_HEAD_FACTOR;
-  if(dir>0){
-    for(int i=0;i<totalStep;i++){
-      myStepper.step(stepMove);  // Move one step
-      //Serial.printf("stepper: %d\n",stepMove);
-      //currentPosition += stepDirection;             // Update position
-      vTaskDelay(pdMS_TO_TICKS(stepDelay));  // Delay for speed control
-      ////Serial.printf("Current Position: %d\n", currentPosition);  // Log position
-      errorCheck();
+void moveStepperToPosition(int targetPosition, int speedMode) {
+    static int currentPosition = 0;  // Tracks the current position of the motor
+    int stepDelay;
+
+    // Set delay based on speed mode
+    switch (speedMode) {
+        case 1: stepDelay = SLOW_DELAY; break;    // Slow speed
+        case 2: stepDelay = MEDIUM_DELAY; break;  // Medium speed
+        case 3: stepDelay = FAST_DELAY; break;    // Fast speed
+        default: 
+            Serial.println("Invalid speed mode! Defaulting to medium speed.");
+            stepDelay = MEDIUM_DELAY;
     }
-  }
-  else{
-    myStepper.step(stepMove*totalStep);  // Move one step 
-  }
-  ////Serial.println("Reached target position.");
+
+    Serial.printf("Moving from %d to %d at %s speed\n", 
+                  currentPosition, 
+                  targetPosition, 
+                  (speedMode == 1) ? "slow" : (speedMode == 2) ? "medium" : "fast");
+
+    // Calculate the number of steps required
+    int stepsToMove = (targetPosition - currentPosition) * STEPS_PER_UNIT;
+    int stepDirection = (stepsToMove > 0) ? 1 : -1;
+
+    // Move incrementally
+    while (currentPosition != targetPosition) {
+        myStepper.step(stepDirection * STEPS_PER_UNIT);  // Move one step
+        currentPosition += stepDirection;             // Update position
+        delay(stepDelay);                             // Delay for speed control
+
+        Serial.printf("Current Position: %d\n", currentPosition);  // Log position
+        errorCheck();
+    }
+
+    Serial.println("Reached target position.");
 }
 
 void errorCheck(){
@@ -393,15 +409,9 @@ String error_text = "";
     index_img = P_ERROR;
     xSemaphoreGive(displaySemaphore);
 
-    ////Serial.println("Printing paused due to error. Waiting for resume...");
+    Serial.println("Printing paused due to error. Waiting for resume...");
     // Wait for resume signal from resume button (polling it)
-    int buzzerCount = 0;
     while (digitalRead(RESUME_BTN_PIN) == HIGH) {
-      if(buzzerCount<5){
-        buzzerCount++;
-        tone(BUZZER_PIN, 1000, 500);  // Buzzer for error
-        vTaskDelay(pdMS_TO_TICKS(500));  // Polling every 100 ms
-      }
       vTaskDelay(pdMS_TO_TICKS(100));  // Polling every 100 ms
     }
 
@@ -419,32 +429,23 @@ String error_text = "";
     message.line2 = TXT_RESUMING;
     index_img = P_BUSY;
     xSemaphoreGive(displaySemaphore);
-    ////Serial.println("Resuming print job...");
+    Serial.println("Resuming print job...");
   }
 }
 
-void paperFeederMove()
-{
-  paperFeedServo.attach(SERVO_PIN);
-  paperFeedServo.write(90);
-  vTaskDelay(pdMS_TO_TICKS(1000));
-  paperFeedServo.write(0);
-  vTaskDelay(pdMS_TO_TICKS(1000));
-}
 // Task for processing print jobs
 void printJobTask(void *pvParameters) {
 int printingMode = MODE_PAPER;
-structPrintJobQueue jobPrint;
+structPrintJobQueue job;
 char buffer[16];
   while (true) {
     if (xSemaphoreTake(printSemaphore, portMAX_DELAY) == pdTRUE) {
       int pages = 0;
-      if (xQueueReceive(printJobQueue, &jobPrint, portMAX_DELAY) == pdPASS) {
-        pages = jobPrint.pages;
-        printingMode = jobPrint.mode;
+      if (xQueueReceive(printJobQueue, &job, portMAX_DELAY) == pdPASS) {
+        pages = job.pages;
+        printingMode = job.mode;
         UBaseType_t messagesWaiting = uxQueueMessagesWaiting(printJobQueue);
         sprintf(buffer,"Printing %d pages, Q:%d",pages,messagesWaiting);
-        //Serial.println(buffer);
         while(xSemaphoreTake(displaySemaphore, 0) != pdTRUE) {
           vTaskDelay(pdMS_TO_TICKS(100));
         }
@@ -458,7 +459,7 @@ char buffer[16];
         printerStat2Disp = P_BUSY;
         xSemaphoreGive(statusPrinterSemaphore);
         
-        //Serial.println("Printing job started...");
+        Serial.println("Printing job started...");
 
         // Feed paper only once before printing
         //Serial.println("Feeding paper...");
@@ -467,8 +468,11 @@ char buffer[16];
         // Simulate printing pages
         for (int i = 1; i <= pages; i++) {
           // Move the servo to simulate paper feed when resuming after an error
-          paperFeederMove();
-          //Serial.printf("Printing page %d of %d\n", i,pages);
+          paperFeedServo.write(90);  // Simulate paper feed movement
+          vTaskDelay(pdMS_TO_TICKS(1000));  // Paper feed delay
+          paperFeedServo.write(0);   // Reset servo
+
+          Serial.printf("Printing page %d\n", i);
           
           sprintf(buffer,"Page %d printed",i);
           while(xSemaphoreTake(displaySemaphore, 0) != pdTRUE) {
@@ -481,15 +485,17 @@ char buffer[16];
 
           for(int line=0;line<PAPER_LINE;line++){
             if(printingMode == MODE_IMAGE){
-              moveStepperToPosition(CW, SPEED_SLOW);
+              moveStepperToPosition(END_POS_P_HEAD, SPEED_SLOW);
             }else if(printingMode == MODE_PAPER){
-              moveStepperToPosition(CW, SPEED_MEDIUM); 
+              moveStepperToPosition(END_POS_P_HEAD, SPEED_MEDIUM); 
             }
             vTaskDelay(pdMS_TO_TICKS(500));
-            moveStepperToPosition(CCW, SPEED_FAST);   // Fast mode
+            moveStepperToPosition(0, SPEED_FAST);   // Fast mode
             vTaskDelay(pdMS_TO_TICKS(500));
 
-            paperFeederMove();
+            paperFeedServo.write(90);  // Simulate paper feed movement
+            vTaskDelay(pdMS_TO_TICKS(1000));  // Paper feed delay
+            paperFeedServo.write(0);   // Reset servo
           }
         }
         // After printing is done, set the printer to idle
@@ -578,7 +584,7 @@ void displayTask(void *pvParameters) {
 
         }
         // Delay for 300 ms
-        vTaskDelay(pdMS_TO_TICKS(300));
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
 
@@ -593,60 +599,54 @@ int PrevLocalPrinterStat2Disp = P_IDLE;
     if(LocalPrinterStat2Disp != PrevLocalPrinterStat2Disp){
      //=========printer error==============================
       if (printerStat2Disp == P_ERROR) {
-        //////Serial.println("Error: Printer has a problem!");
+        Serial.println("Error: Printer has a problem!");
         digitalWrite(LED_IDLE_PIN, LOW);
         digitalWrite(LED_ERROR_PIN, HIGH);
         digitalWrite(LED_BUSY_PIN, LOW);
         digitalWrite(EN_LCD_PIN, HIGH);
-        //tone(BUZZER_PIN, 1000, 500);  // Buzzer for error
+        tone(BUZZER_PIN, 1000, 500);  // Buzzer for error
       //=========printer error==============================
       } 
       else if (printerStat2Disp == P_POWER_SAVER){
           if(!change_priority_receivePrint){
-            ////Serial.println("change receivePrintJobTaskHandle to 1");
+            Serial.println("change receivePrintJobTaskHandle to 1");
             change_priority_receivePrint = true;
             vTaskPrioritySet(receivePrintJobTaskHandle, 1);
           } 
-          //////Serial.println("Turn off some component");
+          Serial.println("Turn off some component");
           digitalWrite(LED_IDLE_PIN, LOW);
           digitalWrite(LED_ERROR_PIN, LOW);
           digitalWrite(LED_BUSY_PIN, LOW);
           digitalWrite(EN_LCD_PIN, LOW);
-
-          //turnoff stepper
-          digitalWrite(26,LOW);
-          digitalWrite(27,LOW);
-          digitalWrite(32,LOW);
-          digitalWrite(33,LOW);  
           if (uxQueueMessagesWaiting(printJobQueue) == 0) {
-            ////Serial.println("No more jobs in queue. Deleting tasks...");
+            Serial.println("No more jobs in queue. Deleting tasks...");
             if (printJobTaskHandle != NULL) {
               vTaskDelete(printJobTaskHandle);
               printJobTaskHandle = NULL;
-              ////Serial.println("Deleting tasks printJob...");
+              Serial.println("Deleting tasks printJob...");
             }
             if (displayTaskHandle != NULL) {
               vTaskDelete(displayTaskHandle);
               displayTaskHandle = NULL;
-              ////Serial.println("Deleting tasks display...");
+              Serial.println("Deleting tasks display...");
             }
           }
       }
       else if (printerStat2Disp == P_IDLE) {
-        //////Serial.println("Printer is idle.");
+        Serial.println("Printer is idle.");
         digitalWrite(LED_ERROR_PIN, LOW);
         digitalWrite(LED_BUSY_PIN, LOW);
         digitalWrite(LED_IDLE_PIN, HIGH);
         digitalWrite(EN_LCD_PIN, HIGH);
       }       
       else if (printerStat2Disp == P_BUSY) {
-       // ////Serial.println("Printer is busy...");
+        Serial.println("Printer is busy...");
         digitalWrite(LED_ERROR_PIN, LOW);
         digitalWrite(LED_BUSY_PIN, HIGH);
         digitalWrite(LED_IDLE_PIN, LOW);
         digitalWrite(EN_LCD_PIN, HIGH);
         if(change_priority_receivePrint){
-          ////Serial.println("change receivePrintJobTaskHandle to 3");
+          Serial.println("change receivePrintJobTaskHandle to 3");
           vTaskPrioritySet(receivePrintJobTaskHandle, 3);
           change_priority_receivePrint = false;
         }
