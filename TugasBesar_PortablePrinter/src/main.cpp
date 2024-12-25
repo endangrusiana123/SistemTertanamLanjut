@@ -14,13 +14,19 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define LED_ERROR_PIN 5
 #define PAPER_SENS_PIN 15            // Simulating error printing
 #define INKLEVEL_SENS_PIN 23         // Simulating error printing
+#define PAPER_SENS_PIN 15            // Simulating error printing
+#define INKLEVEL_SENS_PIN 23         // Simulating error printing
 #define BUZZER_PIN 17
 #define SERVO_PIN 2
+#define RESUME_BTN_PIN 4   // Pin for the resume button
 #define RESUME_BTN_PIN 4   // Pin for the resume button
 
 #define PRINT_JOB_QUEUE_SIZE 5
 #define MAX_PRINT_PAGES 10
 
+#define P_IDLE 0
+#define P_ERROR 1
+#define P_POWER_SAVER 2
 #define P_IDLE 0
 #define P_ERROR 1
 #define P_POWER_SAVER 2
@@ -43,6 +49,19 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 const int stepsPerRevolution = 64;
 Stepper myStepper(stepsPerRevolution, 26, 27, 32, 33);
+
+bool change_priority_receivePrint = false;
+char inputBuffer[12];
+int bufferIndex = 0;
+unsigned long count_idle = 0;
+Servo paperFeedServo;
+Servo buzzerError;
+int printerStat2Disp = P_IDLE;
+
+typedef struct {
+    int pages;           // Number of pages
+    int mode;            // Printing mode (e.g., image or paper)
+} structPrintJobQueue;
 
 bool change_priority_receivePrint = false;
 char inputBuffer[10];
@@ -126,7 +145,7 @@ DisplayMessage message;
 
 void setup() {
   Serial.begin(115200);
-
+  Serial.println("Printer setup...");
   pinMode(EN_LCD_PIN, OUTPUT);
   digitalWrite(EN_LCD_PIN, HIGH);
   pinMode(LED_IDLE_PIN, OUTPUT);
@@ -169,6 +188,7 @@ void setup() {
   xSemaphoreGive(displaySemaphore);
   xSemaphoreGive(statusPrinterSemaphore);
 
+  count_idle = millis(); 
   xTaskCreate(receivePrintJobTask, "Receive Print Job Task", 4096, NULL, 3, &receivePrintJobTaskHandle);
   Serial.println("task1 created..");
   xTaskCreate(displayTask, "Display Task", 4096, NULL, 1, &displayTaskHandle);
@@ -176,6 +196,12 @@ void setup() {
   xTaskCreate(statusMonitoringTask, "Status Monitoring Task", 4096, NULL, 1, &statusMonitoringTaskHandle);
   Serial.println("task3 created..");
   xTaskCreate(powerSaverTask, "Power Saver Task", 4096, NULL, 1, NULL);
+  // Serial.println("task1 created..");
+  // vTaskDelay(pdMS_TO_TICKS(100));
+  //Serial.println("task2 created..");
+  // vTaskDelay(pdMS_TO_TICKS(100));
+  // Serial.println("task3 created..");
+  // vTaskDelay(pdMS_TO_TICKS(100));
   
   digitalWrite(LED_IDLE_PIN, HIGH);
   Serial.println("Printer ready...");
@@ -436,10 +462,8 @@ char buffer[16];
         Serial.println("Printing job started...");
 
         // Feed paper only once before printing
-        Serial.println("Feeding paper...");
-        paperFeedServo.write(90);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        paperFeedServo.write(0);
+        //Serial.println("Feeding paper...");
+        //paperFeederMove();
 
         // Simulate printing pages
         for (int i = 1; i <= pages; i++) {
@@ -475,7 +499,7 @@ char buffer[16];
           }
         }
         // After printing is done, set the printer to idle
-        Serial.println("Print job complete.");
+        //Serial.println("Print job complete.");
 
         if(messagesWaiting == 0){
           count_idle = millis();
