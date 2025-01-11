@@ -40,6 +40,13 @@
       "left": 140,
       "attrs": { "text": "Printer Simulation Using FreeRTOS" }
     },
+    {
+      "type": "wokwi-text",
+      "id": "txt3",
+      "top": 420,
+      "left": -20,
+      "attrs": { "text": "Print Head Motor" }
+    },
     { "type": "wokwi-gnd", "id": "gnd2", "top": 0, "left": 479.4, "attrs": {} },
     { "type": "wokwi-vcc", "id": "vcc1", "top": -37.64, "left": 412.8, "attrs": {} },
     {
@@ -98,7 +105,7 @@
       "top": 239.79,
       "left": -39.63,
       "rotate": 180,
-      "attrs": { "size": "17", "arrow": "yellow" }
+      "attrs": { "size": "17", "arrow": "yellow"}
     },
     {
       "type": "wokwi-led",
